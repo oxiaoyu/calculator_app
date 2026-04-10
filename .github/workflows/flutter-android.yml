@@ -49,3 +49,18 @@ jobs:
           name: calculator-app-release
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
+
+      - name: Upload to Pgyer (蒲公英)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          curl -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
+               -F "_api_key=${{ secrets.PGYER_API_KEY }}" \
+               -F "buildInstallType=2" \
+               -F "buildName=calculator-app" \
+               -F "buildVersion=${{ github.ref_name }}" \
+               -F "buildUpdateDescription=Auto upload via GitHub Actions" \
+               https://www.pgyer.com/apiv2/app/upload
+
+      - name: Print Pgyer URL (蒲公英安装链接)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "上传到蒲公英成功！请前往 https://www.pgyer.com 查看"
