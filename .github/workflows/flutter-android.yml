@@ -50,71 +50,57 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
-      - name: Upload to Pgyer (蒲公英)
+      - name: Upload to Pgyer
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          api_key="${{ secrets.PGYER_API_KEY }}"
-          tag_name="${GITHUB_REF#refs/tags/}"
+          API_KEY="${{ secrets.PGYER_API_KEY }}"
+          VERSION="${{ github.ref_name }}"
           
-          # Step 1: Get token and immediately extract
-          echo "Step 1: Get token and extract..."
-          token_resp=$(curl -s -X POST "https://api.pgyer.com/apiv2/app/getCOSToken" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "_api_key=${api_key}" \
-            --data-urlencode "buildType=android" \
-            --data-urlencode "buildInstallType=1" \
-            --data-urlencode "buildName=calculator-app" \
-            --data-urlencode "buildVersion=${tag_name}" \
-            --data-urlencode "buildUpdateDescription=GitHub Actions")
+          # Get token
+          TOKEN_RESP=$(curl -s -X POST "https://api.pgyer.com/apiv2/app/getCOSToken" \
+            -F "_api_key=$API_KEY" \
+            -F "buildType=android" \
+            -F "buildInstallType=1" \
+            -F "buildName=calculator-app" \
+            -F "buildVersion=$VERSION" \
+            -F "buildUpdateDescription=GitHubActions")
           
-          echo "Token: $token_resp"
+          echo "Token response: $TOKEN_RESP"
           
-          # Parse JSON in one go using python
-          python3 << PYEOF
-import json, subprocess, os
-token_resp = '''$token_resp'''
-try:
-    data = json.loads(token_resp).get('data', {})
-    params = data.get('params', {})
-    cos_key = data.get('key', '')
-    cos_endpoint = data.get('endpoint', '')
-    cos_signature = params.get('signature', '')
-    cos_token = params.get('x-cos-security-token', '')
-    
-    if not cos_key:
-        print("Error: No key in response")
-        exit(1)
-    
-    # Step 2: Upload immediately (no delays!)
-    print("Step 2: Uploading file...")
-    apk_path = "build/app/outputs/flutter-apk/app-release.apk"
-    
-    cmd = f'''curl -s -X POST "{cos_endpoint}" -F "key={cos_key}" -F "signature={cos_signature}" -F "x-cos-security-token={cos_token}" -F "x-cos-meta-file-name=app-release.apk" -F "file=@{apk_path}"'''
-    result = os.system(cmd)
-    print(f"Upload result code: {result}")
-    
-    # Step 3: Wait and check
-    print("Step 3: Waiting 20s for processing...")
-    import time
-    time.sleep(20)
-    
-    status_resp = os.popen(f"curl -s 'https://api.pgyer.com/apiv2/app/buildInfo?_api_key={'$api_key'}&buildKey={cos_key}'").read()
-    print(f"Status: {status_resp}")
-    
-    status_data = json.loads(status_resp)
-    if status_data.get('code') == 0:
-        build_key = status_data.get('data', {}).get('buildKey', '')
-        print("")
-        print("="*40)
-        print("✅ 上传成功!")
-        print("="*40)
-        print(f"安装地址: https://www.pgyer.com/install/{build_key}")
-        print(f"二维码: https://www.pgyer.com/install/{build_key}#apk")
-        print("="*40)
-    else:
-        print(f"状态码: {status_data.get('code')}, 消息: {status_data.get('message')}")
-        print("请访问 https://www.pgyer.com 查看")
-        
-except Exception as e:
-    print(f"Error: {e}")
-PYEOF
+          # Extract values using python in subprocess
+          python3 -c "
+import json,sys,subprocess
+token = '''$TOKEN_RESP'''
+d = json.loads(token)
+data = d.get('data',{})
+params = data.get('params',{})
+print('KEY='+data.get('key',''))
+print('ENDPOINT='+data.get('endpoint',''))
+print('SIG='+params.get('signature',''))
+print('TOK='+params.get('x-cos-security-token',''))
+" > /tmp/pgyer.env
+          
+          source /tmp/pgyer.env
+          echo "Uploading to $ENDPOINT with key $KEY..."
+          
+          # Upload immediately
+          curl -s -X POST "$ENDPOINT" \
+            -F "key=$KEY" \
+            -F "signature=$SIG" \
+            -F "x-cos-security-token=$TOK" \
+            -F "x-cos-meta-file-name=app-release.apk" \
+            -F "file=@build/app/outputs/flutter-apk/app-release.apk"
+          echo "Upload done, waiting 25s..."
+          sleep 25
+          
+          # Check status
+          STATUS=$(curl -s "https://api.pgyer.com/apiv2/app/buildInfo?_api_key=$API_KEY&buildKey=$KEY")
+          echo "Status: $STATUS"
+          
+          # Extract result
+          BUILD_KEY=$(echo "$STATUS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))")
+          if [ -n "$BUILD_KEY" ]; then
+            echo "====================================="
+            echo "✅ SUCCESS! Install: https://www.pgyer.com/install/$BUILD_KEY"
+            echo "====================================="
+          fi
