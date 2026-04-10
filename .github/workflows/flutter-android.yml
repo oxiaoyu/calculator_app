@@ -53,14 +53,25 @@ jobs:
       - name: Upload to Pgyer (蒲公英)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          curl -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
+          response=$(curl -s -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
                -F "_api_key=${{ secrets.PGYER_API_KEY }}" \
                -F "buildInstallType=2" \
                -F "buildName=calculator-app" \
                -F "buildVersion=${{ github.ref_name }}" \
                -F "buildUpdateDescription=Auto upload via GitHub Actions" \
-               https://www.pgyer.com/apiv2/app/upload
-
-      - name: Print Pgyer URL (蒲公英安装链接)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: echo "上传到蒲公英成功！请前往 https://www.pgyer.com 查看"
+               https://www.pgyer.com/apiv2/app/upload)
+          echo "蒲公英响应: $response"
+          
+          # 提取 buildQRCodeURL 用于显示
+          qr_url=$(echo $response | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildQRCodeURL',''))" 2>/dev/null)
+          if [ -n "$qr_url" ]; then
+            echo "::set-output name=qr_url::$qr_url"
+            echo "✅ 二维码地址: https://app-icon.pgyer.com/$qr_url"
+          fi
+          
+          # 提取 buildKey
+          build_key=$(echo $response | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))" 2>/dev/null)
+          if [ -n "$build_key" ]; then
+            echo "::set-output name=build_key::$build_key"
+            echo "✅ 安装地址: https://www.pgyer.com/install/$build_key"
+          fi
