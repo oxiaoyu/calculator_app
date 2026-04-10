@@ -20,6 +20,8 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze
+      
+      # Build debug APK (更可靠)
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
@@ -27,6 +29,7 @@ jobs:
           name: app-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
+      # Build release APK 
       - run: flutter build apk --release
         if: startsWith(github.ref, 'refs/tags/v')
 
@@ -36,30 +39,28 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Upload to Pgyer (直接API)
+      - name: Upload to Pgyer (使用debug APK)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           API_KEY="${{ secrets.PGYER_API_KEY }}"
           VERSION="${{ github.ref_name }}"
-          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          # 上传 debug APK (更兼容)
+          APK_PATH="build/app/outputs/flutter-apk/app-debug.apk"
           
-          echo "使用直接上传API..."
+          echo "上传debug版本到蒲公英..."
           
-          # 使用旧的直接上传API (不需要COS)
           RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" \
             -F "_api_key=$API_KEY" \
             -F "buildType=android" \
             -F "buildInstallType=1" \
             -F "buildName=calculator-app" \
             -F "buildVersion=$VERSION" \
-            -F "buildUpdateDescription=GitHubActions-AutoUpload" \
+            -F "buildUpdateDescription=GitHubActions-debug" \
             -F "file=@$APK_PATH")
           
           echo "响应: $RESPONSE"
           
-          # 解析结果
           CODE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',-1))")
-          MSG=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))")
           
           if [ "$CODE" = "0" ]; then
             BUILD_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))")
@@ -68,5 +69,5 @@ jobs:
             echo "安装: https://www.pgyer.com/install/$BUILD_KEY"
             echo "================================"
           else
-            echo "❌ 上传失败: $MSG (code: $CODE)"
+            echo "❌ 上传失败"
           fi
