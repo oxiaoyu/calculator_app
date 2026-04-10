@@ -20,41 +20,80 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze
-      
-      # Build debug APK (universal - all architectures)
-      - run: flutter build apk --debug
 
+      # Release signing setup (only for tagged builds)
+      - name: Create keystore
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
+          echo "Keystore created successfully"
+
+      - name: Create key.properties
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cat > android/key.properties << EOF
+          storePassword=${{ secrets.RELEASE_STORE_PASSWORD }}
+          keyPassword=${{ secrets.RELEASE_KEY_PASSWORD }}
+          keyAlias=${{ secrets.RELEASE_KEY_ALIAS }}
+          storeFile=release-keystore.jks
+          EOF
+          echo "key.properties created successfully"
+
+      # Build APK (Debug for main, Release for tags)
+      # Debug build (for main branch)
+      - name: Build Debug APK
+        if: github.ref == 'refs/heads/main'
+        run: flutter build apk --debug
+
+      # Release build (for tags)
+      - name: Build Release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: flutter build apk --release
+
+      # Upload artifacts to GitHub
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main'
         with:
           name: app-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
-      - name: Upload to Pgyer (debug)
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      # Upload to Pgyer (for tagged releases only)
+      - name: Upload to Pgyer (release)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           API_KEY="${{ secrets.PGYER_API_KEY }}"
           VERSION="${{ github.ref_name }}"
-          APK_PATH="build/app/outputs/flutter-apk/app-debug.apk"
-          
-          echo "上传debug版本到蒲公英..."
-          
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+
+          echo "Uploading release APK to Pgyer..."
+          echo "Version: $VERSION"
+
           RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" \
             -F "_api_key=$API_KEY" \
             -F "buildType=android" \
             -F "buildInstallType=1" \
             -F "buildName=calculator-app" \
             -F "buildVersion=$VERSION" \
-            -F "buildUpdateDescription=debug-GitHubActions" \
+            -F "buildUpdateDescription=release-GitHubActions" \
             -F "file=@$APK_PATH")
-          
-          echo "响应: $RESPONSE"
-          
+
+          echo "Response: $RESPONSE"
+
           CODE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',-1))")
-          
+
           if [ "$CODE" = "0" ]; then
             BUILD_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))")
             echo "================================"
-            echo "✅ 上传成功!"
-            echo "安装: https://www.pgyer.com/install/$BUILD_KEY"
+            echo "✅ Upload successful!"
+            echo "Install: https://www.pgyer.com/install/$BUILD_KEY"
             echo "================================"
+          else
+            echo "❌ Upload failed with code: $CODE"
+            exit 1
           fi

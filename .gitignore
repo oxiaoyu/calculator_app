@@ -41,3 +41,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Keystore and signing configuration (injected by GitHub Actions)
+android/key.properties
+android/app/release-keystore.jks
+android/app/release-keystore.bks
