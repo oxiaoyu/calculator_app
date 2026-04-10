@@ -21,7 +21,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       
-      # Build debug APK (更可靠)
+      # Build debug APK (universal - all architectures)
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
@@ -29,22 +29,11 @@ jobs:
           name: app-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
-      # Build release APK 
-      - run: flutter build apk --release
-        if: startsWith(github.ref, 'refs/tags/v')
-
-      - uses: actions/upload-artifact@v4
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Upload to Pgyer (使用debug APK)
+      - name: Upload to Pgyer (debug)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           API_KEY="${{ secrets.PGYER_API_KEY }}"
           VERSION="${{ github.ref_name }}"
-          # 上传 debug APK (更兼容)
           APK_PATH="build/app/outputs/flutter-apk/app-debug.apk"
           
           echo "上传debug版本到蒲公英..."
@@ -55,7 +44,7 @@ jobs:
             -F "buildInstallType=1" \
             -F "buildName=calculator-app" \
             -F "buildVersion=$VERSION" \
-            -F "buildUpdateDescription=GitHubActions-debug" \
+            -F "buildUpdateDescription=debug-GitHubActions" \
             -F "file=@$APK_PATH")
           
           echo "响应: $RESPONSE"
@@ -68,6 +57,4 @@ jobs:
             echo "✅ 上传成功!"
             echo "安装: https://www.pgyer.com/install/$BUILD_KEY"
             echo "================================"
-          else
-            echo "❌ 上传失败"
           fi
