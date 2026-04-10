@@ -19,9 +19,7 @@ jobs:
           flutter-version: '3.24.0'
 
       - run: flutter pub get
-
       - run: flutter analyze
-
       - run: flutter build apk --debug
 
       - uses: actions/upload-artifact@v4
@@ -38,54 +36,37 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Upload to Pgyer
+      - name: Upload to Pgyer (直接API)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           API_KEY="${{ secrets.PGYER_API_KEY }}"
           VERSION="${{ github.ref_name }}"
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
           
-          # Step 1 - Get token
-          echo "Getting token..."
-          TOKEN=$(curl -s -X POST "https://api.pgyer.com/apiv2/app/getCOSToken" \
-            --data-urlencode "_api_key=$API_KEY" \
-            --data-urlencode "buildType=android" \
-            --data-urlencode "buildInstallType=1" \
-            --data-urlencode "buildName=calculator-app" \
-            --data-urlencode "buildVersion=$VERSION" \
-            --data-urlencode "buildUpdateDescription=Auto")
+          echo "使用直接上传API..."
           
-          echo "$TOKEN"
+          # 使用旧的直接上传API (不需要COS)
+          RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" \
+            -F "_api_key=$API_KEY" \
+            -F "buildType=android" \
+            -F "buildInstallType=1" \
+            -F "buildName=calculator-app" \
+            -F "buildVersion=$VERSION" \
+            -F "buildUpdateDescription=GitHubActions-AutoUpload" \
+            -F "file=@$APK_PATH")
           
-          # Extract JSON data
-          KEY=$(echo "$TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('key',''))")
-          ENDPOINT=$(echo "$TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('endpoint',''))")
-          SIG=$(echo "$TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('params',{}).get('signature',''))")
-          TOK=$(echo "$TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('params',{}).get('x-cos-security-token',''))")
+          echo "响应: $RESPONSE"
           
-          echo "Key: $KEY"
+          # 解析结果
+          CODE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',-1))")
+          MSG=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))")
           
-          # Step 2 - Upload immediately
-          echo "Uploading..."
-          curl -s -X POST "$ENDPOINT" \
-            -F "key=$KEY" \
-            -F "signature=$SIG" \
-            -F "x-cos-security-token=$TOK" \
-            -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
-            -w "\\n%{http_code}" || echo "204"
-          
-          echo "Waiting 25s..."
-          sleep 25
-          
-          # Step 3 - Check status
-          echo "Checking status..."
-          STATUS=$(curl -s "https://api.pgyer.com/apiv2/app/buildInfo?_api_key=$API_KEY&buildKey=$KEY")
-          echo "$STATUS"
-          
-          BUILD_KEY=$(echo "$STATUS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))")
-          if [ -n "$BUILD_KEY" ]; then
+          if [ "$CODE" = "0" ]; then
+            BUILD_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('buildKey',''))")
             echo "================================"
-            echo "SUCCESS! https://www.pgyer.com/install/$BUILD_KEY"
+            echo "✅ 上传成功!"
+            echo "安装: https://www.pgyer.com/install/$BUILD_KEY"
             echo "================================"
           else
-            echo "Check pgyer.com manually"
+            echo "❌ 上传失败: $MSG (code: $CODE)"
           fi
